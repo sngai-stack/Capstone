@@ -1,0 +1,123 @@
+/*
+ * PUMP CONTROLLER OVER SERIAL
+ * ===========================
+ * 
+ * WHAT THIS CODE DOES:
+ * - Controls a pump (or actuator) on pin 5 via Serial commands.
+ * - Supports manual ON/OFF and automatic toggling at a fixed interval.
+ * - Includes a safety RESET command.
+ * 
+ * PIN ASSIGNMENTS:
+ * - pin 5 (PWM capable): Pump control output. Drives a MOSFET/relay.
+ *   NOTE: Never connect a pump directly to an Arduino pin!
+ *   Use an external driver (relay, MOSFET, motor driver).
+ * 
+ * SERIAL COMMANDS (115200 baud, newline terminated):
+ * - "DIR CW"   → Turn pump ON
+ * - "DIR CCW"  → Turn pump OFF
+ * - "AUTO <ms>" → Enable auto mode, toggle every <ms> milliseconds
+ * - "MANUAL"   → Disable auto mode (pump state unchanged)
+ * - "RESET"    → Emergency stop: pump off, auto mode disabled, timer cleared
+ * 
+ * WHAT THE USER SHOULD CHANGE (HARDWARE & SAFETY):
+ * 1. Add a flyback diode across the pump if it's inductive (DC motor).
+ * 2. Use a suitable MOSFET/relay – pin 5 cannot supply enough current.
+ * 3. Add a current-limiting resistor on the gate if using a MOSFET.
+ * 4. Consider renaming "DIR CW/CCW" to "ON/OFF" to avoid confusion.
+ * 5. Add a minimum auto interval (e.g., 100 ms) to prevent rapid switching.
+ * 6. Handle millis() overflow for very long runtimes (>49 days).
+ */
+
+const int pumpPin = 5;   // Pin 5 (PWM capable) – controls the pump driver
+
+bool pumpOn = false;      // Current desired pump state
+bool autoMode = false;    // True = auto toggle active, false = manual control
+
+unsigned long intervalMs = 0;   // Auto toggle period (milliseconds)
+unsigned long lastSwitch = 0;    // Last time the pump state was toggled in auto mode
+
+// Force the pump to a safe OFF state
+void setSafeOff() {
+  pumpOn = false;                // Update state variable
+  digitalWrite(pumpPin, LOW);    // Ensure pin is LOW (off)
+  analogWrite(pumpPin, 0);       // Redundant – also clears any PWM (safe)
+}
+
+void setup() {
+  pinMode(pumpPin, OUTPUT);      // Set pin as output
+
+  // HARD SAFE STARTUP – double insurance
+  setSafeOff();
+  delay(500);
+  setSafeOff();
+
+  Serial.begin(115200);          // Start serial communication
+  Serial.println("SYSTEM READY");
+}
+
+void loop() {
+
+  // ---------- SERIAL COMMAND PARSING ----------
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+
+    // MANUAL ON
+    if (cmd == "DIR CW") {
+      pumpOn = true;
+      Serial.println("ACK CW");
+    }
+
+    // MANUAL OFF
+    if (cmd == "DIR CCW") {
+      pumpOn = false;
+      Serial.println("ACK CCW");
+    }
+
+    // AUTO MODE – expects "AUTO <milliseconds>"
+    if (cmd.startsWith("AUTO")) {
+      intervalMs = cmd.substring(4).toInt();   // Extract number
+      autoMode = true;
+      lastSwitch = millis();                   // Reset the toggle timer
+      Serial.println("ACK AUTO ON");
+    }
+
+    // MANUAL MODE – stops auto toggling, leaves pump state as is
+    if (cmd == "MANUAL") {
+      autoMode = false;
+      Serial.println("ACK MANUAL");
+    }
+
+    // RESET – emergency stop, clears all timers and modes
+    if (cmd == "RESET") {
+      autoMode = false;
+      pumpOn = false;
+      intervalMs = 0;
+      lastSwitch = 0;
+
+      setSafeOff();               // Physically turn pump off
+
+      Serial.println("ACK RESET SAFE");
+    }
+  }
+
+  // ---------- AUTO TOGGLE LOGIC ----------
+  if (autoMode && intervalMs > 0) {
+    unsigned long now = millis();
+
+    // If interval has elapsed, flip the pump state
+    if (now - lastSwitch >= intervalMs) {
+      pumpOn = !pumpOn;           // Toggle
+      lastSwitch = now;           // Reset timer
+    }
+  }
+
+  // ---------- OUTPUT STAGE ----------
+  if (pumpOn) {
+    analogWrite(pumpPin, 200);    // PWM duty cycle ~78% (0-255)
+  } else {
+    setSafeOff();                 // Turn off safely
+  }
+
+  delay(10);  // Small delay to prevent serial buffer overrun and give CPU time
+}
