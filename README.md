@@ -68,9 +68,9 @@ The system supports:
 
 - **Arduino IDE** (to upload the firmware)  
 - **Python 3.7+** with the following packages:
-|||Install pyserial via pip:
+Install pyserial via pip:
     ```bash
-    pip install pyserial||||
+    pip install pyserial
 
 Installation & Setup
 1. Upload the Arduino firmware
