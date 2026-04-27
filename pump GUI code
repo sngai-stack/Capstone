@@ -1,0 +1,201 @@
+"""
+PUMP CONTROL GUI (PC side)
+==========================
+
+WHAT THIS CODE DOES:
+- Provides a graphical interface to control an Arduino-based pump system.
+- Connects over serial (USB) using configurable port and baud rate.
+- Sends the same commands as the Arduino firmware: "DIR CW" (ON), "DIR CCW" (OFF),
+  "MANUAL", "AUTO<ms>", and "RESET".
+- Reads and logs any serial responses from the Arduino.
+- Automatically sends safety commands (MANUAL + DIR CCW) on connect, and RESET on disconnect.
+
+HARDWARE INTERACTION (matches Arduino code on pin 5):
+- The Arduino controls a pump via pin 5 (PWM). The GUI only sends text commands.
+- No direct pin assignments in this Python code – it's purely a controller.
+
+WHAT THE USER SHOULD CHANGE / IMPROVE (without modifying the logic below):
+1. Add error handling for invalid AUTO values (negative numbers, text).
+2. Add a "STOP" button that sends "RESET" immediately.
+3. Show the current pump state (ON/OFF, AUTO/MANUAL) by parsing Arduino ACK messages.
+4. Use a proper threading lock when accessing `ser` to avoid race conditions on disconnect.
+5. Add a timeout watchdog – if no serial response for N seconds, auto‑disconnect.
+6. Make the log box auto‑scroll optional (user preference).
+7. Add a "Clear log" button.
+8. Validate that the serial port exists before attempting connection.
+9. Allow saving/loading of last used port and baud rate.
+10. For production: package with pyinstaller and add an icon.
+"""
+
+import tkinter as tk
+from tkinter import ttk
+import serial
+import serial.tools.list_ports
+import threading
+import time
+
+# ========== GLOBALS ==========
+ser = None          # Serial connection object (global)
+connected = False   # Connection status flag
+
+# ========== LOGGING ==========
+def log(msg):
+    """Append a timestamped message to the log text widget."""
+    log_box.insert("end", msg + "\n")
+    log_box.see("end")   # Auto-scroll to bottom
+
+# ========== SERIAL PORTS ==========
+def get_ports():
+    """Return a list of available serial ports (device names)."""
+    return [p.device for p in serial.tools.list_ports.comports()]
+
+def refresh_ports():
+    """Update the dropdown menu with current port list."""
+    port_menu['values'] = get_ports()
+
+# ========== CONNECTION ==========
+def connect_serial():
+    """Establish serial connection, send initial safety commands."""
+    global ser, connected
+
+    try:
+        # Open serial port with user-selected settings, 1s timeout
+        ser = serial.Serial(port_var.get(), int(baud_var.get()), timeout=1)
+        time.sleep(2)                     # Allow Arduino to reset
+
+        connected = True
+        status_label.config(text="Connected", fg="green")
+        log("[SYSTEM] Connected")
+
+        # FORCE SAFE STATE ON CONNECT (matches Arduino's expected behaviour)
+        send("MANUAL")      # Disable auto mode
+        send("DIR CCW")     # Turn pump off
+
+    except Exception as e:
+        log(f"[ERROR] {e}")
+
+def disconnect_serial():
+    """Safely close serial connection after sending RESET."""
+    global ser, connected
+
+    try:
+        if connected and ser:
+            # Send commands to ensure pump stops and auto mode is off
+            send("MANUAL")
+            send("RESET")          # Arduino's emergency stop
+            time.sleep(0.2)        # Give time for transmission
+            ser.close()
+
+        connected = False
+        status_label.config(text="Disconnected", fg="red")
+        log("[SYSTEM] DISCONNECTED + RESET SAFE STATE")
+
+    except Exception as e:
+        log(f"[ERROR] {e}")
+
+# ========== SEND COMMAND ==========
+def send(cmd):
+    """Send a command string (with newline) over serial if connected."""
+    if connected and ser:
+        try:
+            ser.write((cmd + "\n").encode())
+        except:
+            log("[ERROR] Send failed")
+
+# ========== CONTROL BUTTONS ==========
+def pump_on():
+    send("DIR CW")
+    log("[CONTROL] Pump ON (CW)")
+
+def pump_off():
+    send("DIR CCW")
+    log("[CONTROL] Pump OFF (CCW SAFE)")
+
+def set_manual():
+    send("MANUAL")
+    log("[MODE] Manual mode enabled")
+
+def set_auto():
+    """Read interval value + unit, convert to milliseconds, send AUTO<ms>."""
+    val = float(interval_entry.get())          # May raise ValueError
+    unit = interval_unit.get()
+
+    # Conversion multipliers to milliseconds
+    mult = {
+        "sec": 1000,
+        "min": 60000,
+        "hour": 3600000,
+        "day": 86400000
+    }
+
+    ms = int(val * mult[unit])
+    send(f"AUTO{ms}")                          # Command format expected by Arduino
+
+    log(f"[MODE] AUTO enabled: {val} {unit}")
+
+# ========== SERIAL READER THREAD ==========
+def read_serial():
+    """Background thread: continuously read lines from Arduino and log them."""
+    while True:
+        if connected and ser:
+            try:
+                line = ser.readline().decode().strip()
+                if line:
+                    log(f"[SERIAL] {line}")
+            except:
+                pass
+        time.sleep(0.05)   # Small delay to prevent CPU overuse
+
+# Start the background reader thread (daemon so it exits with GUI)
+threading.Thread(target=read_serial, daemon=True).start()
+
+# ========== GUI CONSTRUCTION ==========
+root = tk.Tk()
+root.title("Pump Control System (SAFE FINAL)")
+
+# --- Serial Connection Frame ---
+frame = tk.LabelFrame(root, text="Serial Connection")
+frame.pack(fill="x")
+
+port_var = tk.StringVar()
+port_menu = ttk.Combobox(frame, textvariable=port_var, values=get_ports())
+port_menu.grid(row=0, column=1)
+
+baud_var = tk.StringVar(value="115200")
+ttk.Combobox(frame, textvariable=baud_var,
+             values=["9600", "115200"]).grid(row=1, column=1)
+
+tk.Button(frame, text="Connect", command=connect_serial).grid(row=2, column=0)
+tk.Button(frame, text="Disconnect", command=disconnect_serial).grid(row=2, column=1)
+tk.Button(frame, text="Refresh", command=refresh_ports).grid(row=0, column=2)
+
+status_label = tk.Label(frame, text="Disconnected")
+status_label.grid(row=3, column=0, columnspan=3)
+
+# --- Pump Control Frame ---
+ctrl = tk.LabelFrame(root, text="Pump Control")
+ctrl.pack(fill="x")
+
+tk.Button(ctrl, text="ON (CW)", command=pump_on).pack(side="left")
+tk.Button(ctrl, text="OFF (CCW)", command=pump_off).pack(side="left")
+tk.Button(ctrl, text="MANUAL", command=set_manual).pack(side="left")
+
+# --- Auto Mode Frame ---
+auto = tk.LabelFrame(root, text="Auto Mode")
+auto.pack(fill="x")
+
+interval_entry = tk.Entry(auto, width=10)
+interval_entry.pack(side="left")
+
+interval_unit = ttk.Combobox(auto, values=["sec", "min", "hour", "day"])
+interval_unit.set("sec")
+interval_unit.pack(side="left")
+
+tk.Button(auto, text="Enable AUTO", command=set_auto).pack(side="left")
+
+# --- Log Display ---
+log_box = tk.Text(root, height=18, bg="black", fg="lime")
+log_box.pack(fill="both", expand=True)
+
+# Start the Tkinter event loop
+root.mainloop()
