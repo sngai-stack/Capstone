@@ -96,3 +96,6 @@ Baud rate must be 115200 (matches the Arduino).
 Click Connect. The GUI will automatically send MANUAL and DIR CCW to ensure a safe start.
 
 Use the buttons to control the pump.
+
+Circuit Schematic for setting up mosfet 
+<img width="1531" height="1027" alt="image" src="https://github.com/user-attachments/assets/bde67bcc-ab9b-416f-bb81-932bd99cc5ba" />
