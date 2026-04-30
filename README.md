@@ -97,5 +97,5 @@ Click Connect. The GUI will automatically send MANUAL and DIR CCW to ensure a sa
 
 Use the buttons to control the pump.
 
-Circuit Schematic for setting up mosfet 
-<img width="1531" height="1027" alt="image" src="https://github.com/user-attachments/assets/bde67bcc-ab9b-416f-bb81-932bd99cc5ba" />
+Circuit Schematic for setting up mosfet: 
+<img width="1531" height="1027" alt="image" src="https://github.com/user-attachments/assets/924e5428-d92e-4e31-9c40-e4707d740a9d" />
