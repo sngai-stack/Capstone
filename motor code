@@ -1,0 +1,20 @@
+
+// ===== USER INPUT =====
+const int pwmPin = 3;
+int dutyPercent = 100;   // <-- CHANGE THIS (0 to 100)
+
+// ===== SETUP =====
+void setup() {
+  pinMode(pwmPin, OUTPUT);
+
+  // Convert % to 0–255 PWM value
+  int pwmValue = map(dutyPercent, 0, 100, 0, 255);
+  analogWrite(pwmPin, pwmValue);
+}
+
+// ===== LOOP =====
+void loop() {
+  // nothing needed, PWM runs continuously
+}
+
+
